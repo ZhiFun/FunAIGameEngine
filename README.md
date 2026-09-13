@@ -1,140 +1,339 @@
 # FunAIGameEngine
 
-**当前版本：v1.0.1** —— 版本号唯一来源是 `engine/include/engine/Version.h`；改版本时同步
-`lib/FunAIGameEngine/library.json` 的 `"version"` 与根 `CMakeLists.txt` 的 `project(... VERSION ...)`。
+**A cartridge-based 2D game engine for ESP32-S3 and the desktop.**
+One firmware, many games: a game is a single `.gbn` file that contains the bytecode *and*
+every asset it needs. Swap the file, not the firmware.
 
-一个「用 AI 制作小游戏」的轻量 2D 游戏引擎：
+**v1.0.1** · C++17 · LVGL 8.3.x · ESP32-S3 + Windows simulator
 
-- **一套 API，两处运行**：Windows 模拟器（Qt + LVGL + Qt Multimedia）里验证玩法；验证通过后一键导出 ESP32-S3 固件。
-- **默认 LVGL 显示**：引擎用 LVGL 的显示驱动 + 全屏 `lv_canvas` 做像素渲染，游戏也可以直接使用 LVGL 控件。
-- **标准化输入**：上/下/左/右 + A/B/C/D + Start/Select + L/R + X/Y，模拟器与硬件同一套语义（见 `docs/INPUT.md`）。
-- **内置素材体系**：角色 / 背景 / 特效 / 音效 / BGM，统一命名与打包（见 `docs/ASSETS.md`）。
-- **AI 是"程序员"**：引擎提供一份稳定的 SDK + 模板 + 命令行工具，AI 照着 `docs/AI_GAMEDEV_GUIDE.md` 写每个游戏的代码（见下文"流程"）。
-- **架构总览**：整体分层、卡带格式、端到端用法、已知陷阱 → [`docs/ENGINE_ARCHITECTURE.md`](docs/ENGINE_ARCHITECTURE.md)。
+---
 
-## 目录结构
+## The idea
 
+In most embedded game projects the game *is* the firmware: a new game means a rebuild, a
+reflash, and a separate binary for every board. This engine inverts that:
+
+| | |
+|---|---|
+| **Firmware** | Built once. Holds the engine and nothing game-specific. |
+| **Cartridge (`.gbn`)** | One file = bytecode + strings + sprites + sounds. |
+| **Shipping a game** | Copy a file into `data/`, add one line to the on-device shelf. |
+
+The same engine core compiles for the Windows simulator and for the ESP32, so a game that
+plays correctly on the desktop plays identically on hardware — the platform differences are
+absorbed by `platform/` and `runtime/`.
+
+## Features
+
+- **Bytecode VM + cartridge container.** The `.gbn` file is parsed *zero-copy*: the asset
+  table points straight into the loaded buffer, so nothing is duplicated in RAM.
+- **Two ways to write a game.**
+  A small statically-typed scripting language (`game.gs`, compiled to bytecode) for games
+  that ship as cartridges; or native C++ implementing one `engine::Game` subclass.
+- **Display through LVGL.** The engine renders into a full-screen `lv_canvas`; games may
+  also use LVGL widgets directly.
+- **Standardised input.** Up/Down/Left/Right + A/B/C/D + Start/Select + L/R + X/Y, with
+  identical semantics on simulator and hardware.
+- **Rate-aware audio mixer.** 1 looping BGM voice + 6 SFX voices. Every clip carries its own
+  sample rate and the mixer resamples on the fly (see [Hard limits](#hard-limits)).
+- **Two sprite formats, chosen automatically.** RGB565 for large/colourful images, 4bpp
+  indexed for small ones — the packer picks per image.
+- **Dependency-free asset pipeline.** PNG decode, WAV resample and image packing are written
+  against the Python standard library only. No Pillow, no numpy, no ffmpeg.
+- **Ships as a normal Arduino library.** `engine/` has `library.properties`, `library.json`,
+  `src/`, `examples/` and `keywords.txt`; LVGL is the only external dependency.
+- **Offline iteration tooling.** A reference VM with a software framebuffer, engine-accurate
+  screenshots, compiler tracebacks and a hang locator, so most work happens without flashing.
+
+## Architecture at a glance
+
+```mermaid
+graph TD
+    CART["games-bin/*.gbn<br/>bytecode + strings + assets"]
+    VM["ScriptGame<br/>GamePackage + bytecode VM"]
+    GAME["engine::Game<br/>on_start / on_update / on_render"]
+    CORE["engine core<br/>Display · AssetStore · AudioMixer · Input"]
+    SIM["platform/sim<br/>Qt window + audio sink"]
+    ESP["platform/esp32s3*<br/>TFT_eSPI + I2S"]
+    RT["runtime/keyboard<br/>board glue"]
+
+    CART --> VM --> CORE
+    GAME --> CORE
+    CORE --> RT
+    SIM --> RT
+    ESP --> RT
 ```
-FunAIGameEngine/
-├── engine/                 # 平台无关的引擎核心(纯 C++17, 只依赖 LVGL)
-│   ├── include/engine/     #   Engine / Game / Display / Input / Audio / AssetStore ...
-│   └── src/
-├── games/                  # 原生 C++ 游戏 + 注册表(键盘固件不链接它们, 现留作规格参考)
-│   ├── registry.{h,cpp}    #   create_game()/create_from_cart()/cart_has_script()
-│   ├── fighter/            #   规格参考: 格斗(已脚本化)
-│   ├── keychase/           #   规格参考: 吃豆人(已脚本化)
-│   └── skyraider/          #   规格参考: 横版射击(已脚本化)
-├── platform/
-│   ├── sim/                # Windows 模拟器: Qt Widgets 窗口 + LVGL 驱动 + QAudioSink
-│   └── esp32s3/            # ESP32-S3 导出模板(PlatformIO): TFT_eSPI + I2S 音频
-├── assets-src/             # 原始素材(PNG / WAV), 按游戏分目录
-├── assets-packed/          # 打包后的 .img/.snd(生成物, 运行时读取)
-├── games-src/              # 【脚本游戏】<name>/game.gs + 素材
-├── games-bin/              # 【脚本游戏】编译产物 <name>.gbn(可加载的游戏文件)
-├── runtime/
-│   └── keyboard/           # 键盘固件侧的运行库(移植这个目录即可打开 bin 玩)
-├── tools/
-│   ├── engine.py           # CLI: new / pack / assets / build / run / export
-│   ├── gs_compiler.py      # 游戏脚本 -> 字节码
-│   ├── build_game.py       # 脚本+素材 -> 单个 .gbn
-│   ├── pack_assets.py      # PNG+WAV -> .img+.snd(纯标准库, 无依赖)
-│   └── gen_sample_assets.py# 生成示例素材
-└── docs/                   # 架构 / API / 输入 / 素材 / 脚本 / AI 写游戏指南
-```
 
-## 快速开始
+`engine::Game` is the **only** game interface. A script cartridge and a native C++ game are
+just two implementations of it; the platform layer neither knows nor cares which one is in
+use. Full layered description: [`docs/ENGINE_ARCHITECTURE.md`](docs/ENGINE_ARCHITECTURE.md).
 
-前置：CMake ≥ 3.16、一个 C++17 编译器、Qt 6（本机 `C:\Qt\6.9.3\mingw_64`，与 FunKeyboardTools 同款，需含 Multimedia 组件）。
-LVGL 8.3.11 已本地化到 `third_party/lvgl`，构建不需要联网。
+## Repository layout
 
-```powershell
-# 1) 生成并打包素材(纯标准库, 首次跑一次即可)
-py -3 tools\gen_sample_assets.py
-py -3 tools\gen_common_ui_assets.py     # 通用 UI(控件/HUD/覆盖层)
-py -3 tools\gen_skyraider_ui_assets.py  # skyraider 座舱 HUD
+| Path | What it is |
+|---|---|
+| `engine/` | **The engine, and the publishable unit** — a standard Arduino library (`src/engine/*.h` next to `*.cpp`, plus `library.properties` / `library.json` / `examples/`) |
+| `games/` | Native C++ games + `registry.cpp`. Kept as the **spec reference** for the script ports; the keyboard firmware links none of them |
+| `games-src/<name>/` | Script game sources: `game.gs` plus its art/audio |
+| `games-bin/<name>.gbn` | Built cartridges — what the simulator and the firmware actually load |
+| `assets-src/`, `assets-packed/` | Original art (`.png`/`.wav`) and packed output (`.img`/`.snd`) |
+| `platform/sim/` | Windows simulator: Qt window, LVGL driver, audio sink |
+| `platform/esp32s3/`, `platform/esp32s3keyboard/` | Export templates for real hardware |
+| `runtime/keyboard/` | Board-side runtime: `read_pad`, audio backend, lifecycle |
+| `tools/` | The whole offline toolchain (Python 3, standard library only) |
+| `docs/` | Detailed documentation (**currently written in Chinese**) |
+| `third_party/lvgl/` | Vendored LVGL 8.3.11 so the build never needs the network |
+
+## Quick start (desktop simulator)
+
+Requirements: CMake ≥ 3.16, a C++17 compiler, and Qt 6 **including the Multimedia module**.
+On Windows the reference setup is Qt at `C:\Qt\6.9.3\mingw_64` with the MinGW 13.1 toolchain.
+
+```bat
+cd F:\New_Project\FunAIGameEngine
+
+:: 1) generate the sample assets and pack them into assets-packed/
+py -3 tools\engine.py gen-samples
 py -3 tools\engine.py assets
 
-# 2) 配置 + 编译模拟器(推荐直接用 Qt Creator 打开 CMakeLists.txt 选 MinGW 套件;
-#    命令行如下, Qt 路径按本机改)
-cmake -S . -B build -G "MinGW Makefiles" ^
-  -DCMAKE_PREFIX_PATH=C:/Qt/6.9.3/mingw_64 ^
-  -DCMAKE_C_COMPILER=C:/Qt/Tools/mingw1310_64/bin/gcc.exe ^
-  -DCMAKE_CXX_COMPILER=C:/Qt/Tools/mingw1310_64/bin/g++.exe
-cmake --build build
+:: 2) configure + build the simulator (drop --qt-dir if you use Qt Creator instead)
+py -3 tools\engine.py configure --qt-dir C:/Qt/6.9.3/mingw_64
+py -3 tools\engine.py build
 
-# 3) 运行示例(默认 skyraider)
-build\fun_sim.exe skyraider
+:: 3) play
+py -3 tools\engine.py run skyraider
 ```
 
-> 也可以全走 CLI：`py -3 tools\engine.py configure --qt-dir C:/Qt/6.9.3/mingw_64`
-> → `build` → `run skyraider`，它内部会先打包素材并自动定位 `fun_sim.exe`。
+The simulator window is **428×142**, matching the NV3007 panel used on the reference
+keyboard. Arrow keys move, `A` fires, `B` is the special, `Esc` quits.
 
-运行后看到 428×142 窗口（与键盘实机 NV3007 同分辨率），`方向键`移动、`A` 开火、`B` 技能、`Esc` 退出。
+A bare `fun_sim.exe` needs the Qt DLLs on `PATH` (otherwise it exits immediately with
+`0xC0000135`), so prefer launching it through `engine.py run` or `tools\sim_shot.py`,
+both of which set the environment up for you.
 
-## 脚本游戏：游戏是一个可加载的 bin 文件（推荐）
+## Run a cartridge
 
-游戏逻辑写在 `games-src/<name>/game.gs`，编译打包成**单个 `.gbn` 文件**（字节码 + 内嵌素材）。
-键盘固件只移植一次引擎运行库，之后**换游戏只需换 bin 文件，不用重烧固件**。
-
-```powershell
-py -3 tools\engine.py pack starfall                  # -> games-bin/starfall.gbn
-py -3 tools\engine.py run games-bin\starfall.gbn    # 模拟器直接跑 bin
+```bat
+py -3 tools\engine.py pack starfall                   :: -> games-bin/starfall.gbn
+py -3 tools\engine.py run games-bin\starfall.gbn      :: simulator loads the .gbn directly
 ```
 
-游戏目录：
+Everything the CLI understands:
+
+| Command | Purpose |
+|---|---|
+| `gen-samples` | Generate the sample art/audio |
+| `assets` | Pack `assets-src/` → `assets-packed/` |
+| `configure --qt-dir <path>` | Configure the CMake build |
+| `build` | Build the simulator |
+| `run [game\|cart.gbn]` | Run a game id, or a cartridge file |
+| `new <name>` | Scaffold a native C++ game from the template |
+| `pack <name>` | Compile + pack a script game into a `.gbn` |
+| `export <name> [--target esp32s3]` | Export to a PlatformIO project |
+| `targets` | List the available hardware targets |
+
+## Make a new game (script route)
+
+```bat
+:: 1) a game is a folder: game.gs + its assets
+mkdir games-src\mygame
+::    games-src\mygame\game.gs
+::    games-src\mygame\player.png
+::    games-src\mygame\coin.wav
+
+:: 2) compile + pack into one cartridge
+py -3 tools\build_game.py mygame
+
+:: 3) check the logic — reference VM, seconds per run
+py -3 tools\gs_run.py games-src\mygame\game.gs --frames 600 --pad right,a ^
+    --globals px,score,lives --png tools\_preview\mygame.png
+
+:: 4) check the actual engine rendering
+py -3 tools\sim_shot.py tools\_preview\sim_mygame.png mygame --zoom 2
+```
+
+A script game has exactly three entry points — `on start`, `on update`, `on render`.
+The language is documented in [`docs/SCRIPT.md`](docs/SCRIPT.md).
+
+**Keep this iteration order.** The reference VM in `gs_run.py` is a second implementation of
+the same bytecode; it is fast and gives you variables, but *passing it does not mean the
+engine passes*. `sim_shot.py` renders through the real engine and has caught several
+"reference OK, engine silently wrong" bugs.
+
+To ship:
+
+```bat
+copy games-bin\mygame.gbn  <firmware>\data\
+:: add one shelf entry in the firmware's src/ui/ui_GameScreenSecondary.c:
+::   { "MY GAME", "SUBTITLE", true, &ui_img_gamecover_mygame, "mygame" },
+:: then reflash the app AND the filesystem image (see docs/ENGINE_ARCHITECTURE.md 4.4)
+```
+
+## The cartridge format
 
 ```
-games-src/starfall/
-  game.gs     脚本(语法见 docs/SCRIPT.md)
-  star.png    素材(会打包成 star.img)
-  coin.wav    音效(会打包成 coin.snd)
+"GBN1" | u16 version | u16 globalCount
+       | u32 initPC | u32 startPC | u32 updatePC | u32 renderPC
+       | u32 codeSize | u32 stringCount | u32 assetCount
+       | code[]
+       | strings[]  : u16 len + utf8 bytes      (no NUL terminator)
+       | assets[]   : u16 nameLen + name + u32 size + bytes
 ```
 
-移植到键盘固件：见 `runtime/keyboard/README.md`（把 `data/*.gbn` 烧进 SPIFFS，
-在宿主里调 `game_runtime::start/tick/stop`，约 20 行胶水代码）。
+- Script cartridges carry bytecode; the four entry points address the compiled functions and
+  `globalCount` is the size of the VM's memory pool (scalars and array elements share it,
+  capped at `kMaxGlobals = 2048`).
+- A **data-only cartridge** (for a native C++ game) sets `codeSize = 1` — a single `HALT`, because
+  `parse()` requires `codeSize > 0` — with all four entry points set to `0xFFFFFFFF`.
 
-## 流程：做一个游戏
+`GamePackage::parse()` copies nothing. The asset table points into your buffer, which means
+**the cartridge must outlive the game that uses it** (on the firmware it stays resident in PSRAM).
 
-**推荐路线 —— 脚本卡带**（换游戏不用重烧固件，迭代也是秒级的）：
+## Asset formats
 
-1. 建 `games-src/mygame/`，写 `game.gs`，素材（`.png`/`.wav`，或直接放现成的 `.img`/`.snd`）放旁边。
-2. `py -3 tools\build_game.py mygame` —— 编译 + 打包成 `games-bin/mygame.gbn`。
-3. `py -3 tools\gs_run.py games-src\mygame\game.gs --frames 600 --pad right,a --globals score`
-   —— 字节码的 Python 参考实现 + 软件帧缓冲，秒级看逻辑对不对。
-4. `py -3 tools\sim_shot.py tools\_preview\sim_mygame.png mygame --zoom 2` —— 真引擎渲染截图。
-5. 拷 `mygame.gbn` 进键盘 `data/`，在货架上加一行条目，`upload` + `uploadfs`。
+| Format | Layout | Use |
+|---|---|---|
+| `IMG1` | `"IMG1" + u16 w + u16 h + w*h*2` (RGB565) | Large / colourful images. Magenta is the transparent colour |
+| `IMG2` | `"IMG2" + u16 w + u16 h + 16×u16 palette + ceil(w*h/2)` | 4bpp indexed. Index 0 is always transparent; rows are not padded; the high nibble is the left pixel |
+| `SND1` | `"SND1" + u32 rate + u32 frames + int16[frames]` | Mono PCM. The rate is **per clip** |
 
-完整版见 [`docs/ENGINE_ARCHITECTURE.md`](docs/ENGINE_ARCHITECTURE.md) 的 §4。
+The packer picks `IMG2` when an image has ≤ 16 colours **and** ≤ 4096 pixels, and `IMG1`
+otherwise (indexed images cost a palette lookup per pixel, which stops paying off on big
+images). Naming conventions and the full asset workflow: [`docs/ASSETS.md`](docs/ASSETS.md).
 
-**备选路线 —— 原生 C++ 游戏**（需要 VM 表达不了的东西时；代价是加游戏要重烧固件）：
+## Use it as an Arduino library
 
-1. `py -3 tools\engine.py new mygame` —— 从模板生成 `games/mygame/`。
-2. AI 只写一个 `Game` 子类（`on_start/on_update/on_render`），调用 `engine.h` 里的 API（画图/输入/音频/素材），素材放进 `assets-src/mygame/`。
-3. `py -3 tools\engine.py assets` —— 打包素材。
-4. 模拟器里验证玩法。
-5. `py -3 tools\engine.py export mygame` —— 生成 `out/mygame-esp32s3/`（PlatformIO 工程 + 已打包素材），
-   `pio run -t upload` 即得到硬件固件。
+`engine/` is a regular Arduino library — LVGL 8.3.x is the only dependency.
 
-详细契约见 `docs/AI_GAMEDEV_GUIDE.md`。
+```cpp
+#include <FunAIGameEngine.h>
 
-## 目前状态
+class Demo : public engine::Game {
+public:
+    const char* name() const override { return "demo"; }
+    void on_start(engine::Engine& e) override { x_ = 40; }
+    void on_update(engine::Engine& e, float dt) override {
+        if (engine::is_pressed(e.input, engine::Button::Right)) x_ += 2;
+    }
+    void on_render(engine::Engine& e) override {
+        e.display.clear(engine::rgb565(8, 10, 18));
+        e.display.fill_rect(x_, 60, 16, 16, engine::rgb565(255, 120, 60));
+    }
+private:
+    int x_ = 40;
+};
+```
 
-- [x] 引擎核心：Display(全屏 canvas + 像素/图形/文字/贴图，支持水平翻转)、Input(标准手柄)、
-      AudioMixer(音乐+音效同时混，按 clip 自带采样率取样)、AssetStore(.img/.snd)。
-- [x] **字节码 VM + `.gbn` 卡带**：游戏是「一个可加载的文件」，不再是「一整套固件」。
-      卡带 = 字节码 + 全部素材，零拷贝解析，直接喂给 `AssetStore`。
-- [x] 脚本语言 v2：浮点 / 数组 / 字符串数组 / 函数 / 水平翻转 / 位运算（见 `docs/SCRIPT.md`）。
-- [x] Windows 模拟器：Qt 窗口 + LVGL 显示驱动 + QAudioSink 音频 + 启动器（可选游戏）。
-- [x] 离线工具链：参考 VM（`gs_run.py`）、引擎截图（`sim_shot.py`）、编译 traceback（`gs_trace.py`）、
-      素材打包/策略强制（`pack_assets.py` / `build_game.py` / `sndlib.py`）。
-- [x] 素材打包器（PNG 解码 / WAV 重采样，纯标准库）+ 示例素材生成器。
-- [x] ESP32-S3 导出模板（PlatformIO + TFT_eSPI + I2S 混音），导出后按板子改一下引脚即可。
-- [x] **三个完整脚本游戏**：`keychase`（吃豆人）、`skyraider`（横版射击）、`fighter`（1v1 格斗）。
-      键盘固件里**不再链接任何原生游戏实现**，只负责把 `data/*.gbn` 读进 PSRAM 并启动 VM。
+**Arduino IDE** — copy (or symlink) `engine/` to `<Documents>/Arduino/libraries/FunAIGameEngine/`,
+or zip the *contents* of `engine/` under a top-level `FunAIGameEngine/` folder and use
+*Sketch → Include Library → Add .ZIP Library*.
 
-> 硬件端需要按你的板子接线微调 `platform/esp32s3/src/esp_display.cpp`（SPI 引脚）与
-> `esp_audio.cpp`（I2S 引脚），其余逻辑与模拟器完全一致。
->
-> ⚠ 卡带住在 SPIFFS 分区（总共 917,504 字节，可用约 844 KB），所以有两条**由构建强制**的
-> 约束：音频采样率 ≤ 11025 Hz、只打包脚本真正引用过的素材。别绕过它们，见
-> `docs/ENGINE_ARCHITECTURE.md` §5.7。
+**PlatformIO**
+
+```ini
+lib_deps =
+    https://github.com/<you>/FunAIGameEngine.git#v1.0.1   ; library lives in engine/ inside the repo
+    lvgl/lvgl@8.3.11
+```
+
+A local checkout works the same way: `file:///F:/New_Project/FunAIGameEngine/engine`.
+
+See [`engine/README.md`](engine/README.md) for the layout rules, the host contract and a
+complete worked example.
+
+## Porting to your own board
+
+The engine is platform independent; **you** supply three things:
+
+| You provide | Interface |
+|---|---|
+| An LVGL display driver | `Display::init()` + `Display::set_present_hook(fn, ctx)` — the engine hands you dirty rectangles to push |
+| A pad bitmask | write `Engine::input.held / pressed / released` (bit layout in `engine/Input.h`) |
+| An audio backend | implement `engine::AudioBackend` and attach it — skip it if you want silence |
+
+A fully worked reference — LVGL bring-up, I2S handover with an existing audio library,
+screen switching and teardown — is `runtime/keyboard/`, and the keyboard firmware that uses
+it documents the sequencing and the failure modes in its own `GAME_ENGINE_INTEGRATION.md`.
+
+## Tools
+
+| Tool | Purpose |
+|---|---|
+| `engine.py` | One front end for configure / build / run / pack / export |
+| `gs_compiler.py` | Script source → bytecode (the authoritative opcode table lives here) |
+| `gs_run.py` | Reference bytecode VM in Python + software framebuffer (`--pad`, `--globals`) |
+| `gs_trace.py` | Full compiler traceback for the errors the compiler compresses into one line |
+| `build_game.py` | Script + assets → a single `.gbn` |
+| `pack_assets.py` | PNG + WAV → `.img` + `.snd` (standard library only) |
+| `sim_shot.py` | Start the simulator, capture the window, exit — engine-accurate screenshots |
+| `sndlib.py` | The single source of truth for the audio sample-rate policy |
+| `embed_assets.py` | Optional: bake assets into the firmware as a fallback filesystem |
+
+## Hard limits
+
+Cartridges live in a **SPIFFS partition of 917,504 bytes** (~844 KB usable), and the app
+partition is already around **90 % full**. Two invariants therefore exist, and they are
+**enforced by the build rather than by memory**:
+
+1. **Audio is stored at ≤ 11025 Hz.** The policy lives in `tools/sndlib.py` (`MAX_RATE`);
+   `pack_assets.py` writes clips at that rate and `build_game.py` re-applies the limit to
+   anything entering a cartridge. The mixer resamples per clip, so duration and pitch are
+   unaffected.
+2. **Only assets the script actually references get packed** — the reference set is the
+   compiled string table — and same-named duplicates are collapsed to one.
+
+Both of these came from real overflow incidents; `docs/ENGINE_ARCHITECTURE.md` §5.7 explains
+the diagnosis when `buildfs` reports `File system is full`.
+
+## Known pitfalls
+
+The VM **fails silently by default**: an unknown opcode, a missing asset or a bad string
+index does not raise an error, it just stops drawing things. Debugging therefore starts with
+stderr, and the eleven documented traps are worth reading before writing your first game —
+see [`docs/ENGINE_ARCHITECTURE.md`](docs/ENGINE_ARCHITECTURE.md) §5. The ones that bite hardest:
+
+- Local variables need an explicit `var`, and **declaring the same name twice allocates a new
+  slot** — a `var i = i + 1` inside a loop is an infinite bytecode loop (and if it is in
+  `on start`, the simulator window simply never opens).
+- Sprite names are compile-time literals; animation frames have to go through a string array.
+- Operator precedence puts comparisons *looser* than bitwise operators: write `(x & 1) == 0`.
+- Variable names shadow the button constants — never name a variable `x`, `a`, `up`, `start`…
+
+## Documentation
+
+All of `docs/` is currently written in Chinese:
+
+| Document | Contents |
+|---|---|
+| [`ENGINE_ARCHITECTURE.md`](docs/ENGINE_ARCHITECTURE.md) | Layering, data contracts, end-to-end usage, the pitfall list, change checklists |
+| [`ENGINE_API.md`](docs/ENGINE_API.md) | The C++ API surface |
+| [`SCRIPT.md`](docs/SCRIPT.md) | The scripting language and its instruction set |
+| [`INPUT.md`](docs/INPUT.md) | Button semantics on both platforms |
+| [`ASSETS.md`](docs/ASSETS.md) | Asset naming, formats and the packing rules |
+| [`AI_GAMEDEV_GUIDE.md`](docs/AI_GAMEDEV_GUIDE.md) | The contract to hand to a code-generating model |
+
+## Status
+
+- [x] Engine core: Display (full-screen canvas, primitives, text, sprites, horizontal flip),
+      Input, AudioMixer (1 BGM + 6 voices, per-clip rate), AssetStore (`.img` / `.snd`)
+- [x] Bytecode VM and the `.gbn` cartridge container, parsed zero-copy
+- [x] Scripting language v2: floats, arrays, string arrays, functions, bitwise operators
+- [x] Windows simulator: Qt window, LVGL driver, audio sink, game launcher
+- [x] Offline toolchain: reference VM, screenshot capture, compiler traceback, packed-asset policy
+- [x] ESP32-S3 export templates (TFT_eSPI + I2S mixer)
+- [x] **Three complete games shipped as cartridges only** — `keychase`, `skyraider`, `fighter`
+- [ ] License not chosen yet
+- [ ] `author` / `maintainer` / `url` in `library.properties` are still placeholders
+
+The keyboard firmware this engine was built for links **no** native game code: it reads
+`data/*.gbn` into PSRAM and starts the VM.
+
+## Version
+
+The single source of truth is `engine/src/engine/Version.h`. When bumping, keep these in sync:
+
+- `engine/library.properties` → `version=`
+- `engine/library.json` → `"version"`
+- root `CMakeLists.txt` → `project(... VERSION ...)`
+
+
