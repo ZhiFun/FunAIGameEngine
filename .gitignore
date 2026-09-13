@@ -1,0 +1,6 @@
+build/
+out/
+.vscode/
+assets-packed/
+*.img
+*.snd

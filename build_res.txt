@@ -1,0 +1,26 @@
+[0/1] Re-running CMake...
+-- Configuring done (1.7s)
+-- Generating done (0.4s)
+-- Build files have been written to: F:/New_Project/FunAIGameEngine/build/Desktop_Qt_6_9_3_MinGW_64_bit-Debug
+[1/22] Building CXX object engine/CMakeFiles/fun_engine.dir/src/engine/Engine.cpp.obj
+[2/22] Building CXX object engine/CMakeFiles/fun_engine.dir/src/engine/Display.cpp.obj
+[3/22] Building CXX object engine/CMakeFiles/fun_engine.dir/src/engine/AudioMixer.cpp.obj
+[4/22] Building CXX object engine/CMakeFiles/fun_engine.dir/src/engine/Audio.cpp.obj
+[5/22] Building CXX object engine/CMakeFiles/fun_engine.dir/src/engine/AssetStore.cpp.obj
+[6/22] Building CXX object engine/CMakeFiles/fun_engine.dir/src/engine/RomFileSystem.cpp.obj
+[7/22] Building CXX object games/CMakeFiles/games_lib.dir/registry.cpp.obj
+[8/22] Building CXX object engine/CMakeFiles/fun_engine.dir/src/engine/ScriptGame.cpp.obj
+[9/22] Building CXX object games/CMakeFiles/games_lib.dir/skyraider/game.cpp.obj
+[10/22] Building CXX object games/CMakeFiles/games_lib.dir/fighter/game.cpp.obj
+[11/22] Building CXX object games/CMakeFiles/games_lib.dir/keychase/game.cpp.obj
+[12/22] Linking CXX static library engine\libfun_engine.a
+[13/22] Linking CXX static library games\libgames_lib.a
+[14/22] Building CXX object platform/sim/CMakeFiles/fun_sim.dir/sim_platform.cpp.obj
+[15/22] Building CXX object platform/sim/CMakeFiles/fun_sim.dir/fun_sim_autogen/mocs_compilation.cpp.obj
+[16/22] Building CXX object platform/sim/CMakeFiles/fun_sim.dir/sim_audio.cpp.obj
+[17/22] Building CXX object platform/sim/CMakeFiles/fun_sim.dir/main.cpp.obj
+[18/22] Building CXX object platform/sim/CMakeFiles/fun_sim.dir/sim_paths.cpp.obj
+[19/22] Building CXX object platform/sim/CMakeFiles/fun_sim.dir/launcher.cpp.obj
+[20/22] Building CXX object platform/sim/CMakeFiles/fun_sim.dir/sim_window.cpp.obj
+[21/22] Linking CXX executable platform\sim\fun_sim.exe
+EXIT=0 

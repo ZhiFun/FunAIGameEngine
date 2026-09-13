@@ -1,0 +1,5 @@
+qt.qpa.screen: "Unable to open monitor interface to \\\\.\\DISPLAY1:" "Unknown error 0xe0000225."
+[sim] 卡带: games-bin/skyraider.gbn (1091712 字节)
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.1 LGPL version 2.1 or later
+[sim] 音频就绪: 22050Hz/2ch, 拉模式(Qt 音频线程喂数据)
+[skyraider] audio: bgm=88192帧 shoot=1984帧 boom=7497帧

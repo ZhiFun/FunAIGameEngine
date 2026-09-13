@@ -1,0 +1,40 @@
+#######################################
+# FunAIGameEngine 库关键字高亮
+# 格式: <关键字><TAB><类型>   (必须是 TAB, 不能是空格)
+#######################################
+FunAIGameEngine	KEYWORD1
+Engine	KEYWORD1
+Game	KEYWORD1
+Display	KEYWORD1
+AssetStore	KEYWORD1
+Audio	KEYWORD1
+AudioMixer	KEYWORD1
+AudioBackend	KEYWORD1
+ScriptGame	KEYWORD1
+GamePackage	KEYWORD1
+RomFileSystem	KEYWORD1
+Button	KEYWORD1
+PadState	KEYWORD1
+Image	KEYWORD1
+Clip	KEYWORD1
+Color	KEYWORD1
+
+on_start	KEYWORD2
+on_update	KEYWORD2
+on_render	KEYWORD2
+name	KEYWORD2
+init	KEYWORD2
+present	KEYWORD2
+set_present_hook	KEYWORD2
+deinit	KEYWORD2
+set_fs	KEYWORD2
+load_assets	KEYWORD2
+attach	KEYWORD2
+play_sfx	KEYWORD2
+play_bgm	KEYWORD2
+stop_bgm	KEYWORD2
+is_held	KEYWORD2
+is_pressed	KEYWORD2
+is_released	KEYWORD2
+bit_of	KEYWORD2
+rgb565	KEYWORD2

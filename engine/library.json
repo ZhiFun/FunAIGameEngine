@@ -1,0 +1,14 @@
+{
+  "name": "FunAIGameEngine",
+  "version": "1.0.1",
+  "description": "卡带式 2D 游戏引擎: LVGL 画布 + 输入/音频抽象 + .gbn 卡带 + 字节码 VM。游戏用 C++ 或脚本编写, 素材与代码打进同一份卡带。",
+  "keywords": "game, engine, lvgl, gbn, vm, esp32",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "headers": "FunAIGameEngine.h",
+  "build": {
+    "flags": [
+      "-std=gnu++17"
+    ]
+  }
+}
